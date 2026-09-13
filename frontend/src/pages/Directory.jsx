@@ -1,0 +1,438 @@
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api } from "../api.js";
+import { formatINR, getInitials, verticalLabel } from "../utils.js";
+
+const VERTICALS = [
+  { value: "", label: "All verticals" },
+  { value: "finance", label: "Personal Finance & Planning" },
+  { value: "career", label: "Career & Work Guidance" },
+];
+// Note: 'emotional' and 'companionship' are intentionally withheld from Phase 1
+// until crisis-escalation and background-check infrastructure exist (see PRD Phase 3/4).
+
+export default function Directory({ user }) {
+  const [guides, setGuides] = useState([]);
+  const [vertical, setVertical] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [monthlyIncome, setMonthlyIncome] = useState(75000);
+  const [monthlyNeeds, setMonthlyNeeds] = useState(45000);
+  const [savings, setSavings] = useState(300000);
+  const [toolMode, setToolMode] = useState("runway");
+  const [selectedPath, setSelectedPath] = useState("");
+  const [selectedFocus, setSelectedFocus] = useState("");
+  const [focusAnswer, setFocusAnswer] = useState("");
+  const focusAreas = [
+    { id: "switching", label: "Switching jobs", detail: "Compare an offer, role, or career move.", vertical: "career", question: "What is the main decision?", options: { offer: "Compare a new offer", burnout: "Move away from a difficult role", direction: "Change my career direction" }, recommendations: { offer: "Compare total compensation, role scope, manager quality, learning, location, and stability before looking only at the headline salary.", burnout: "Separate an urgent exit from a long-term career move. Set a minimum financial buffer and define the conditions your next role must meet.", direction: "Start with transferable skills, target roles, and a realistic learning plan before choosing a course or title." } },
+    { id: "interview", label: "Interview preparation", detail: "Prepare with a clearer point of view.", vertical: "career", question: "What kind of interview is ahead?", options: { first: "First screening or HR round", technical: "Technical or case round", leadership: "Manager or leadership round" }, recommendations: { first: "Prepare a two-minute story covering your work, impact, and the role you want. Keep examples specific and measurable.", technical: "Practise the reasoning behind your answer, not only the final answer. Explain assumptions, trade-offs, and how you would validate the result.", leadership: "Prepare examples of ownership, conflict, prioritisation, and outcomes. Strong leadership answers show what changed because of your actions." } },
+    { id: "salary", label: "Salary negotiation", detail: "Enter the conversation with evidence.", vertical: "career", question: "What are you negotiating?", options: { offer: "A new job offer", raise: "A raise in my current role", counter: "A counteroffer or retention discussion" }, recommendations: { offer: "Compare fixed pay, variable pay, joining bonus, equity, benefits, notice period, and role scope. Ask for the complete structure in writing.", raise: "Build a short evidence sheet with outcomes, expanded responsibilities, market context, and the specific adjustment you are requesting.", counter: "Decide what would genuinely change your situation. A higher number does not solve a role, manager, growth, or culture problem by itself." } },
+    { id: "emergency", label: "Emergency savings", detail: "Understand the buffer your life needs.", vertical: "finance", question: "Where are you starting?", options: { starting: "I have little or no buffer", building: "I am building my buffer", review: "I want to review my target" }, recommendations: { starting: "Begin with one month of essential expenses in an accessible account. Automate a small amount and remove avoidable high-interest debt first.", building: "Work toward three to six months of essential expenses. Keep this money accessible and separate from long-term investments.", review: "Recalculate using essential expenses, dependants, job stability, health needs, and how quickly your income could be replaced." } },
+    { id: "sip", label: "SIP and investing", detail: "Explore time, return, and contribution trade-offs.", vertical: "finance", question: "What is your investing stage?", options: { new: "I am starting", existing: "I already invest", goal: "I have a specific goal" }, recommendations: { new: "Start only after your basic buffer and expensive debt are addressed. Choose an amount you can continue through both good and difficult months.", existing: "Review the purpose, time horizon, risk, costs, and concentration of your existing investments. Do not change a plan only because of short-term market movement.", goal: "Work backwards from the goal amount, timeline, and contribution you can sustain. The required return should be realistic, not chosen to make the calculator look better." } },
+    { id: "tax", label: "Tax and benefits", detail: "Make sense of the choices around your income.", vertical: "finance", question: "What kind of income do you manage?", options: { salary: "Salary and employer benefits", freelance: "Freelance or variable income", multiple: "Multiple income sources" }, recommendations: { salary: "Collect your Form 16, investment proofs, insurance details, and benefits before comparing tax regimes. Use your actual numbers, not generic examples.", freelance: "Separate business and personal cash flow, keep a tax reserve, track invoices and eligible expenses, and speak with a qualified tax professional.", multiple: "Map every income source, advance-tax responsibility, deductions, and documentation in one place before making a year-end decision." } },
+  ];
+  const activeFocus = focusAreas.find((area) => area.id === selectedFocus);
+  const focusRecommendation = activeFocus?.recommendations[focusAnswer];
+  const [sipAmount, setSipAmount] = useState(10000);
+  const [sipRate, setSipRate] = useState(12);
+  const [sipYears, setSipYears] = useState(10);
+  const [loanAmount, setLoanAmount] = useState(2500000);
+  const [loanRate, setLoanRate] = useState(8.5);
+  const [loanYears, setLoanYears] = useState(20);
+  const [plannerAnswers, setPlannerAnswers] = useState({
+    goal: "stability",
+    income: 75000,
+    expenses: 45000,
+    savings: 300000,
+    debt: "none",
+    timeline: "steady",
+  });
+
+  async function loadGuides() {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const params = {};
+      if (vertical) params.vertical = vertical;
+      if (maxPrice) params.max_price = maxPrice;
+      const { data } = await api.get("/guides", { params });
+      setGuides(data);
+    } catch (err) {
+      setLoadError(err.response?.data?.error || "We couldn't load the directory right now.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadGuides();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vertical, maxPrice]);
+
+  const visibleGuides = guides.filter((guide) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    return `${guide.name} ${guide.bio} ${verticalLabel(guide.vertical)}`
+      .toLowerCase()
+      .includes(query);
+  });
+
+  const runway = monthlyNeeds > 0 ? (savings / monthlyNeeds).toFixed(1) : "0.0";
+  const savingsRate = monthlyIncome > 0
+    ? Math.max(0, Math.round(((monthlyIncome - monthlyNeeds) / monthlyIncome) * 100))
+    : 0;
+  const sipMonths = sipYears * 12;
+  const monthlySipRate = sipRate / 100 / 12;
+  const sipValue = monthlySipRate > 0
+    ? sipAmount * ((Math.pow(1 + monthlySipRate, sipMonths) - 1) / monthlySipRate) * (1 + monthlySipRate)
+    : sipAmount * sipMonths;
+  const sipInvested = sipAmount * sipMonths;
+  const loanMonths = loanYears * 12;
+  const monthlyLoanRate = loanRate / 100 / 12;
+  const emi = monthlyLoanRate > 0
+    ? loanAmount * monthlyLoanRate * Math.pow(1 + monthlyLoanRate, loanMonths) / (Math.pow(1 + monthlyLoanRate, loanMonths) - 1)
+    : loanAmount / loanMonths;
+  const plannerSurplus = Math.max(0, plannerAnswers.income - plannerAnswers.expenses);
+  const plannerMonths = plannerAnswers.expenses > 0
+    ? plannerAnswers.savings / plannerAnswers.expenses
+    : 0;
+  const debtPressure = plannerAnswers.debt === "high" ? "high" : plannerAnswers.debt === "some" ? "medium" : "low";
+  const plannerPlan = (() => {
+    const priorities = [];
+    if (plannerMonths < 3) priorities.push({ title: "Build your safety buffer", text: `Aim for ${formatINR(plannerAnswers.expenses * 3)} before increasing investment risk.` });
+    if (debtPressure !== "low") priorities.push({ title: "Reduce expensive debt", text: "Prioritise high-interest balances before adding more long-term investments." });
+    if (plannerAnswers.goal === "home") priorities.push({ title: "Create a home fund", text: "Separate your down-payment target from your emergency savings and review affordability carefully." });
+    if (plannerAnswers.goal === "growth") priorities.push({ title: "Invest consistently", text: "Use a diversified, long-term approach and review your risk level as your timeline changes." });
+    if (plannerAnswers.goal === "stability") priorities.push({ title: "Protect your baseline", text: "Keep essential expenses visible, strengthen your buffer, and review insurance needs." });
+    if (priorities.length === 0) priorities.push({ title: "Keep the system simple", text: "Automate your monthly plan, review it quarterly, and change one priority at a time." });
+    const bufferTarget = plannerAnswers.expenses * (plannerAnswers.timeline === "fast" ? 6 : 3);
+    const bufferGap = Math.max(0, bufferTarget - plannerAnswers.savings);
+    const bufferAllocation = Math.min(plannerSurplus, Math.max(0, bufferGap / 12));
+    const growthAllocation = Math.max(0, plannerSurplus - bufferAllocation);
+    return { priorities, bufferTarget, bufferGap, bufferAllocation, growthAllocation };
+  })();
+
+  const pathwayDetails = {
+    career: {
+      eyebrow: "Career direction, explained",
+      title: "Build a career decision you can stand behind.",
+      description: "Career guidance is not only for finding a job. It helps you understand your strengths, compare opportunities, prepare for important conversations, and make a move without losing sight of your long-term life.",
+      why: "The job market moves quickly across technology, startups, services, government, and remote work. A higher salary is not always a better move if the role, manager, learning curve, location, or stability does not fit your life.",
+      practices: ["Write down your non-negotiables before comparing offers.", "Separate short-term salary from long-term skill and role growth.", "Prepare evidence of your impact before interviews or salary discussions.", "Ask a Guide to challenge your assumptions, not make the decision for you."],
+    },
+    finance: {
+      eyebrow: "Financial clarity, explained",
+      title: "Turn income into freedom and resilience.",
+      description: "Personal finance guidance helps you understand the system around your money: cash flow, protection, taxes, savings, investing, and the trade-offs behind major life choices.",
+      why: "Your salary is only one part of financial security. Rent or home loans, family responsibilities, health costs, taxes, inflation, and irregular income all shape how much freedom you really have.",
+      practices: ["Build an emergency fund before taking more investment risk.", "Review EPF, PPF, NPS, insurance, and tax choices as separate decisions.", "Use a monthly plan based on take-home income, not headline CTC.", "Never invest in a product you cannot explain, and verify regulated advice."],
+    },
+  };
+  const activePath = pathwayDetails[selectedPath];
+
+  return (
+    <div className="directory-page">
+      <section className="directory-hero">
+        <div className="hero-copy">
+          <h1>The smart decisions you make today can fund the freedom you want tomorrow.</h1>
+          <p className="hero-lede">
+            1-on-1 human guidance for your critical career moves and personal
+            finance decisions. Share your context with a verified Guide and walk
+            away with a clear, actionable plan.
+          </p>
+        </div>
+        <div className="hero-card">
+          <span className="hero-card-label">Begin with what matters</span>
+          <strong>Start with the question you cannot answer alone.</strong>
+          <p>Choose a relevant Guide, share your context, and leave with a clearer set of options and next steps.</p>
+          <div className="hero-mark" aria-hidden="true">↗</div>
+        </div>
+      </section>
+
+      <section className="pathways-section" aria-labelledby="pathways-title">
+        <div className="section-intro">
+          <h2 id="pathways-title">Choose the conversation that fits your decision.</h2>
+          <p>Different decisions need different perspectives. Select a path, understand the essentials, and connect with someone who has relevant experience.</p>
+        </div>
+        <div className="pathway-grid">
+          <a className={`pathway-card career-path ${selectedPath === "career" ? "selected" : ""}`} href="#pathway-detail" onClick={() => { setSelectedPath("career"); setVertical("career"); }}>
+            <span className="pathway-number">01</span>
+            <div className="pathway-icon">↗</div>
+            <h3>Work and career</h3>
+            <p>Stop guessing your market worth. Get candid feedback on job offers, compensation ranges, and promotion strategies from experienced practitioners.</p>
+            <span className="pathway-list">Job switches · Interviews · Negotiation</span>
+            <span className="pathway-link">Meet career Guides <span aria-hidden="true">→</span></span>
+          </a>
+          <a className={`pathway-card finance-path ${selectedPath === "finance" ? "selected" : ""}`} href="#pathway-detail" onClick={() => { setSelectedPath("finance"); setVertical("finance"); }}>
+            <span className="pathway-number">02</span>
+            <div className="pathway-icon">₹</div>
+            <h3>Money and planning</h3>
+            <p>No financial jargon or product sales pitches. Build a practical roadmap for your cash flow, taxes (EPF, PPF, NPS), and long-term security.</p>
+            <span className="pathway-list">Cash flow · Tax · Future planning</span>
+            <span className="pathway-link">Meet finance Guides <span aria-hidden="true">→</span></span>
+          </a>
+        </div>
+        {activePath && <article className="pathway-detail" id="pathway-detail">
+          <div className="pathway-detail-lead">
+            <p className="eyebrow">{activePath.eyebrow}</p>
+            <h3>{activePath.title}</h3>
+            <p>{activePath.description}</p>
+          </div>
+          <div className="pathway-detail-info">
+            <div><span className="detail-label">Why it matters</span><p>{activePath.why}</p></div>
+            <div><span className="detail-label">Good practice</span><ul>{activePath.practices.map((practice) => <li key={practice}>{practice}</li>)}</ul></div>
+          </div>
+        </article>}
+      </section>
+
+      <section className="focus-section" aria-labelledby="focus-title">
+        <div className="focus-heading">
+          <div>
+            <p className="eyebrow">Start with the real question</p>
+            <h2 id="focus-title">What are you working through?</h2>
+          </div>
+          <p>Choose a starting point. You can refine the conversation once you find a Guide.</p>
+        </div>
+        <div className="focus-grid">
+          {focusAreas.map((area) => (
+            <a
+              className={`focus-item ${selectedFocus === area.id ? "selected" : ""}`}
+              href={user ? "#focus-detail" : "/login"}
+              key={area.label}
+              onClick={() => { setSelectedFocus(area.id); setFocusAnswer(Object.keys(area.options)[0]); setVertical(area.vertical); setSelectedPath(area.vertical); }}
+            >
+              <span className="focus-item-arrow" aria-hidden="true">↗</span>
+              <strong>{area.label}</strong>
+              <span>{area.detail}</span>
+            </a>
+          ))}
+        </div>
+        {activeFocus && <div className="focus-detail" id="focus-detail">
+          <div className="focus-detail-heading"><span className="eyebrow">Self-serve starting point</span><h3>{activeFocus.label}</h3><p>{activeFocus.question}</p></div>
+          <div className="focus-options">{Object.entries(activeFocus.options).map(([value, label]) => <button className={focusAnswer === value ? "active" : ""} key={value} onClick={() => setFocusAnswer(value)}>{label}</button>)}</div>
+          <div className="focus-recommendation"><span className="detail-label">Your first recommendation</span><p>{focusRecommendation}</p><a href={user ? "#directory" : "/login"} onClick={() => { setVertical(activeFocus.vertical); setSelectedPath(activeFocus.vertical); }}>Explore {activeFocus.vertical === "career" ? "career" : "finance"} Guides <span aria-hidden="true">↗</span></a></div>
+        </div>}
+      </section>
+
+      <section className="toolkit-section smart-desk" aria-labelledby="toolkit-title">
+        <div className="toolkit-copy">
+          <p className="eyebrow">Before you make a money decision</p>
+          <h2 id="toolkit-title">Run the math first. Talk through the reality second.</h2>
+          <p>Use our private, zero-tracking estimators to calculate your runway—then bring your numbers to a Guide to pressure-test your plan.</p>
+          <a className="toolkit-link" href="#directory" onClick={() => setVertical("finance")}>Talk through your plan <span aria-hidden="true">↗</span></a>
+        </div>
+        <div className="planning-panel">
+          <div className="tool-tabs" role="tablist" aria-label="Planning calculators">
+            <button className={toolMode === "runway" ? "active" : ""} onClick={() => setToolMode("runway")} role="tab">Safety runway</button>
+            <button className={toolMode === "sip" ? "active" : ""} onClick={() => setToolMode("sip")} role="tab">SIP growth</button>
+            <button className={toolMode === "emi" ? "active" : ""} onClick={() => setToolMode("emi")} role="tab">Loan EMI</button>
+          </div>
+          {toolMode === "runway" && <div className="calculator-body">
+            <div className="calculator-result"><strong>{runway}</strong><span>months of runway</span><small>Saving rate: {savingsRate}%</small></div>
+            <div className="toolkit-controls compact-controls">
+              <label>Monthly take-home income <output>{formatINR(monthlyIncome)}</output><input type="range" min="10000" max="500000" step="5000" value={monthlyIncome} onChange={(e) => setMonthlyIncome(Number(e.target.value))} /></label>
+              <label>Essential monthly needs <output>{formatINR(monthlyNeeds)}</output><input type="range" min="5000" max="300000" step="2500" value={monthlyNeeds} onChange={(e) => setMonthlyNeeds(Number(e.target.value))} /></label>
+              <label>Accessible savings <output>{formatINR(savings)}</output><input type="range" min="0" max="5000000" step="25000" value={savings} onChange={(e) => setSavings(Number(e.target.value))} /></label>
+            </div>
+          </div>}
+          {toolMode === "sip" && <div className="calculator-body">
+            <div className="calculator-result"><strong>{formatINR(sipValue)}</strong><span>estimated future value</span><small>Estimated gain: {formatINR(Math.max(0, sipValue - sipInvested))}</small></div>
+            <div className="toolkit-controls compact-controls">
+              <label>Monthly SIP <output>{formatINR(sipAmount)}</output><input type="range" min="500" max="200000" step="500" value={sipAmount} onChange={(e) => setSipAmount(Number(e.target.value))} /></label>
+              <label>Expected annual return <output>{sipRate}%</output><input type="range" min="1" max="25" step="0.5" value={sipRate} onChange={(e) => setSipRate(Number(e.target.value))} /></label>
+              <label>Investment period <output>{sipYears} years</output><input type="range" min="1" max="40" step="1" value={sipYears} onChange={(e) => setSipYears(Number(e.target.value))} /></label>
+            </div>
+          </div>}
+          {toolMode === "emi" && <div className="calculator-body">
+            <div className="calculator-result"><strong>{formatINR(emi)}</strong><span>estimated monthly EMI</span><small>Total repayment: {formatINR(emi * loanMonths)}</small></div>
+            <div className="toolkit-controls compact-controls">
+              <label>Loan amount <output>{formatINR(loanAmount)}</output><input type="range" min="100000" max="10000000" step="50000" value={loanAmount} onChange={(e) => setLoanAmount(Number(e.target.value))} /></label>
+              <label>Annual interest rate <output>{loanRate}%</output><input type="range" min="1" max="20" step="0.1" value={loanRate} onChange={(e) => setLoanRate(Number(e.target.value))} /></label>
+              <label>Loan period <output>{loanYears} years</output><input type="range" min="1" max="30" step="1" value={loanYears} onChange={(e) => setLoanYears(Number(e.target.value))} /></label>
+            </div>
+          </div>}
+          <p className="calculator-disclaimer">Illustrative estimate only. Returns, rates, taxes, and eligibility vary. Speak with a qualified professional before acting.</p>
+        </div>
+      </section>
+
+      {false && <section className="planner-section" aria-labelledby="planner-title">
+        <div className="planner-heading">
+          <div>
+            <p className="eyebrow">Build a first plan</p>
+            <h2 id="planner-title">Build your baseline plan in 60 seconds.</h2>
+          </div>
+        </div>
+        <div className="planner-layout">
+          <div className="planner-form">
+            <label>What are you planning for?
+              <select value={plannerAnswers.goal} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, goal: e.target.value })}>
+                <option value="stability">More financial stability</option>
+                <option value="growth">Long-term wealth building</option>
+                <option value="home">A home or major purchase</option>
+              </select>
+            </label>
+            <label>Monthly take-home income
+              <input type="number" min="0" value={plannerAnswers.income} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, income: Number(e.target.value) })} />
+            </label>
+            <label>Essential monthly expenses
+              <input type="number" min="0" value={plannerAnswers.expenses} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, expenses: Number(e.target.value) })} />
+            </label>
+            <label>Accessible savings
+              <input type="number" min="0" value={plannerAnswers.savings} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, savings: Number(e.target.value) })} />
+            </label>
+            <label>Current debt level
+              <select value={plannerAnswers.debt} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, debt: e.target.value })}>
+                <option value="none">No high-interest debt</option>
+                <option value="some">Some loans or credit balances</option>
+                <option value="high">High-interest debt to prioritise</option>
+              </select>
+            </label>
+            <label>How quickly do you need more flexibility?
+              <select value={plannerAnswers.timeline} onChange={(e) => setPlannerAnswers({ ...plannerAnswers, timeline: e.target.value })}>
+                <option value="steady">I can build steadily</option>
+                <option value="fast">I need a stronger buffer soon</option>
+              </select>
+            </label>
+          </div>
+          <div className="planner-result">
+            <div className="planner-result-top"><span className="eyebrow">Your starting plan</span><strong>{formatINR(plannerSurplus)} available monthly</strong></div>
+            <div className="planner-metrics"><div><span>Current runway</span><strong>{plannerMonths.toFixed(1)} mo</strong></div><div><span>Safety target</span><strong>{formatINR(plannerPlan.bufferTarget)}</strong></div></div>
+            <div className="planner-priorities">{plannerPlan.priorities.map((priority, index) => <div className="planner-priority" key={priority.title}><span>0{index + 1}</span><div><strong>{priority.title}</strong><p>{priority.text}</p></div></div>)}</div>
+            <div className="planner-allocation"><span>Suggested next-month allocation</span><div><strong>{formatINR(plannerPlan.bufferAllocation)}</strong> safety buffer <strong>{formatINR(plannerPlan.growthAllocation)}</strong> longer-term goals</div></div>
+            <div className="planner-tools"><span>Continue planning</span><div><button type="button" onClick={() => { setToolMode("sip"); document.getElementById("toolkit-title")?.scrollIntoView({ behavior: "smooth" }); }}>Calculate SIP growth <span aria-hidden="true">↗</span></button><button type="button" onClick={() => { setToolMode("emi"); document.getElementById("toolkit-title")?.scrollIntoView({ behavior: "smooth" }); }}>Estimate loan EMI <span aria-hidden="true">↗</span></button></div></div>
+          </div>
+        </div>
+      </section>}
+
+      {user ? <>
+      <div className="directory-heading" id="directory">
+        <div>
+          <p className="eyebrow">The Guide directory</p>
+          <h2>Meet people with relevant experience.</h2>
+        </div>
+        <div className="directory-summary">
+          <span className="result-count">{guides.length} {guides.length === 1 ? "Guide" : "Guides"} available</span>
+          <span className="summary-divider" aria-hidden="true" />
+          <span className="result-count">Text-based sessions</span>
+        </div>
+      </div>
+
+      <div className="filters directory-filters">
+        <div className="filter-field search-field">
+          <label htmlFor="guide-search">Search the directory</label>
+          <div className="input-with-icon">
+            <span aria-hidden="true">⌕</span>
+            <input
+              id="guide-search"
+              type="search"
+              placeholder="Name, topic, or focus"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="filter-field">
+          <label htmlFor="vertical-filter">Vertical</label>
+          <select
+            id="vertical-filter"
+            value={vertical}
+            onChange={(e) => setVertical(e.target.value)}
+          >
+            {VERTICALS.map((v) => (
+              <option key={v.value} value={v.value}>{v.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="filter-field">
+          <label htmlFor="max-price-filter">Max hourly rate</label>
+          <input
+            id="max-price-filter"
+            type="number"
+            placeholder="e.g. 2,000"
+            value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading-state"><span className="loading-pulse" /> Curating the directory…</div>
+      ) : loadError ? (
+        <div className="empty-state error-state">
+          <span className="empty-icon">!</span>
+          <h3>The directory took a wrong turn</h3>
+          <p>{loadError}</p>
+          <button type="button" className="retry-button" onClick={loadGuides}>Try again</button>
+        </div>
+      ) : visibleGuides.length === 0 ? (
+        <div className="empty-state">
+          <span className="empty-icon">○</span>
+          <h3>No exact match yet</h3>
+          <p>Try a broader search or remove a filter. The right conversation may be one word away.</p>
+        </div>
+      ) : (
+        <div className="guide-grid">
+          {visibleGuides.map((g, index) => (
+            <Link to={`/guides/${g.id}`} key={g.id} className="card guide-card">
+              <div className="guide-card-top">
+                <div className={`avatar avatar-${index % 4}`}>{getInitials(g.name)}</div>
+                <div className="guide-card-heading">
+                  <div className="guide-name-row">
+                    <h3>{g.name}</h3>
+                    <span className="availability-dot" title="Available for new sessions" />
+                  </div>
+                  <span className={`vertical-tag ${g.vertical}`}>
+                    {verticalLabel(g.vertical)}
+                  </span>
+                </div>
+              </div>
+              <div className="guide-meta-row">
+                <span className="rate">{formatINR(g.hourly_rate)}/session</span>
+                <span>
+                  {g.avg_rating ? `★ ${g.avg_rating}` : "New Guide"}
+                  {g.review_count ? ` (${g.review_count})` : ""}
+                </span>
+              </div>
+              <p className="bio-preview">{g.bio}</p>
+              <span className="card-action">View profile <span aria-hidden="true">↗</span></span>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <section className="connection-section" aria-labelledby="connection-title">
+        <div className="connection-heading">
+          <p className="eyebrow">A different kind of network</p>
+          <h2 id="connection-title">Find context, not more content.</h2>
+        </div>
+        <div className="connection-steps">
+          <div><span>01</span><h3>Bring the real situation</h3><p>Start with the decision, constraint, or question you are actually facing.</p></div>
+          <div><span>02</span><h3>Choose relevant experience</h3><p>Compare Guides by focus, background, rate, and the kind of help they offer.</p></div>
+          <div><span>03</span><h3>Leave with a next step</h3><p>Use a private text session to turn a complicated situation into an actionable plan.</p></div>
+        </div>
+      </section>
+      </> : <section className="member-gate" id="directory">
+        <div className="member-gate-mark">✳</div>
+        <p className="eyebrow">Member access</p>
+        <h2>Relevant perspective starts with one question.</h2>
+        <p>Sign in to explore independent Guides, compare their experience, and start a private text session built around your situation.</p>
+        <div className="member-gate-actions">
+          <Link className="portal-button" to="/login">Log in to explore</Link>
+          <Link className="member-gate-link" to="/register">Create a free account <span aria-hidden="true">↗</span></Link>
+        </div>
+        <p className="member-gate-note">Private &amp; zero-spam. Pay per session with no long-term subscriptions.</p>
+      </section>}
+
+      <section className="directory-footer-note" id="our-standard">
+        <div className="footer-note-mark">✳</div>
+        <div>
+          <p className="eyebrow">Our point of view</p>
+          <h3>A network built for decisions, not scrolling.</h3>
+          <p>Whether you are navigating a job change or optimizing your tax strategy, you bring the question—verified industry practitioners bring relevant experience. No algorithms, no product pitches, just focused 1-on-1 context.</p>
+        </div>
+      </section>
+    </div>
+  );
+}
