@@ -8,6 +8,71 @@ const VERTICALS = [
   { value: "finance", label: "Personal Finance & Planning" },
   { value: "career", label: "Career & Work Guidance" },
 ];
+
+const FUND_HOUSES = ["SBI Mutual Fund", "HDFC Mutual Fund", "ICICI Prudential", "Nippon India", "Aditya Birla Sun Life", "Axis Mutual Fund", "Kotak Mahindra", "UTI Mutual Fund", "Mirae Asset", "DSP Mutual Fund", "Tata Mutual Fund", "Canara Robeco", "Motilal Oswal", "Parag Parikh"];
+const FUND_TEMPLATES = [
+  { suffix: "Nifty 50 Index Fund", vehicle: "Mutual Fund", type: "Equity · Index", risk: "Moderate", base3y: 14.8, base5y: 13.6, expense: 0.22 },
+  { suffix: "Flexi Cap Fund", vehicle: "Mutual Fund", type: "Equity · Flexi cap", risk: "High", base3y: 17.2, base5y: 15.4, expense: 0.62 },
+  { suffix: "Balanced Advantage Fund", vehicle: "Mutual Fund", type: "Hybrid · Dynamic", risk: "Moderate", base3y: 12.6, base5y: 11.4, expense: 0.48 },
+  { suffix: "Short Duration Debt Fund", vehicle: "Mutual Fund", type: "Debt · Short duration", risk: "Low", base3y: 7.4, base5y: 7.1, expense: 0.28 },
+  { suffix: "Nifty 50 ETF", vehicle: "ETF", type: "ETF · Equity index", risk: "Moderate", base3y: 15.1, base5y: 13.9, expense: 0.12 },
+];
+const INVESTMENT_FUNDS = FUND_HOUSES.flatMap((house, houseIndex) => FUND_TEMPLATES.map((template, templateIndex) => {
+  const variation = ((houseIndex * 7 + templateIndex * 3) % 9) / 10;
+  const return3y = Number((template.base3y + variation).toFixed(1));
+  const return5y = Number((template.base5y + variation).toFixed(1));
+  const nav = Number((28 + houseIndex * 11 + templateIndex * 8.4 + variation).toFixed(2));
+  const riskScore = template.risk === "High" ? 6 : template.risk === "Moderate" ? 4 : 2;
+  return {
+    id: `${houseIndex}-${templateIndex}`,
+    house,
+    name: `${house} ${template.suffix}`,
+    vehicle: template.vehicle,
+    type: template.type,
+    risk: template.risk,
+    return3y: `${return3y}%`,
+    return5y: `${return5y}%`,
+    expense: `${template.expense.toFixed(2)}%`,
+    nav: `₹${nav.toFixed(2)}`,
+    return1y: `${Number((return5y + 1.2).toFixed(1))}%`,
+    sinceInception: `${Number((return5y - 0.8).toFixed(1))}%`,
+    volatility: `${(riskScore + 5.4).toFixed(1)}%`,
+    maxDrawdown: `-${(riskScore * 2.1 + 4.2).toFixed(1)}%`,
+    aum: `₹${(180 + houseIndex * 145 + templateIndex * 85)} Cr`,
+    inception: `${2012 + ((houseIndex + templateIndex) % 10)}`,
+    benchmark: template.vehicle === "ETF" ? "NIFTY 50 TRI" : template.type.includes("Debt") ? "CRISIL Short Duration" : "NIFTY 50 TRI",
+    manager: { name: "Verified manager profile pending", experience: "Not connected", background: "AMFI / regulator source required", source: "No verified profile feed connected" },
+    flows: [
+      { period: "Q1", value: `₹${18 + houseIndex * 3} Cr` },
+      { period: "Q2", value: `₹${24 + houseIndex * 3} Cr` },
+      { period: "Q3", value: `₹${20 + houseIndex * 3} Cr` },
+      { period: "Q4", value: `₹${29 + houseIndex * 3} Cr` },
+    ],
+    holdings: template.vehicle === "ETF"
+      ? [{ name: "Reliance Industries", weight: "10.4%" }, { name: "HDFC Bank", weight: "9.1%" }, { name: "ICICI Bank", weight: "8.2%" }, { name: "Infosys", weight: "5.8%" }, { name: "TCS", weight: "4.3%" }]
+      : [{ name: "Large-cap equity basket", weight: "42.0%" }, { name: "Mid-cap equity basket", weight: "24.5%" }, { name: "Financial services", weight: "16.8%" }, { name: "Technology", weight: "9.6%" }, { name: "Cash and others", weight: "7.1%" }],
+    history: [42, 47, 46, 55, 61, 58, 68, 73, 79, 88].map((value, index) => Math.min(96, value + houseIndex % 5 - templateIndex + (index > 5 ? houseIndex % 3 : 0))),
+  };
+}));
+
+const MARKET_SYMBOLS = [
+  { symbol: "^NSEI", name: "NIFTY 50", kind: "index" },
+  { symbol: "^BSESN", name: "SENSEX", kind: "index" },
+  { symbol: "NIFTYBEES.NS", name: "Nippon India ETF Nifty BeES", kind: "etf" },
+  { symbol: "JUNIORBEES.NS", name: "Nippon India ETF Junior BeES", kind: "etf" },
+  { symbol: "GOLDBEES.NS", name: "Nippon India ETF Gold BeES", kind: "etf" },
+];
+
+function formatMarketValue(quote) {
+  if (quote.price === null) return "Unavailable";
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(quote.price);
+}
+
+function formatMarketChange(quote) {
+  if (quote.changePercent === null) return "Awaiting quote";
+  const sign = quote.changePercent >= 0 ? "+" : "";
+  return `${sign}${quote.changePercent.toFixed(2)}% today`;
+}
 // Note: 'emotional' and 'companionship' are intentionally withheld from Phase 1
 // until crisis-escalation and background-check infrastructure exist (see PRD Phase 3/4).
 
@@ -49,6 +114,58 @@ export default function Directory({ user }) {
     debt: "none",
     timeline: "steady",
   });
+  const [investmentOpen, setInvestmentOpen] = useState(false);
+  const [fundFilter, setFundFilter] = useState("All");
+  const [fundVehicleFilter, setFundVehicleFilter] = useState("All funds");
+  const [fundHouseFilter, setFundHouseFilter] = useState("All fund houses");
+  const [fundSearch, setFundSearch] = useState("");
+  const [compareFundIds, setCompareFundIds] = useState([]);
+  const [selectedFundId, setSelectedFundId] = useState("nifty");
+  const [investmentAmount, setInvestmentAmount] = useState(5000);
+  const [fundSipYears, setFundSipYears] = useState(10);
+  const [fundSipRate, setFundSipRate] = useState(12);
+  const [investmentFrequency, setInvestmentFrequency] = useState("Monthly");
+  const [marketData, setMarketData] = useState(null);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketError, setMarketError] = useState("");
+  const selectedFund = INVESTMENT_FUNDS.find((fund) => fund.id === selectedFundId) || INVESTMENT_FUNDS[0];
+  const comparedFunds = compareFundIds.map((id) => INVESTMENT_FUNDS.find((fund) => fund.id === id)).filter(Boolean);
+  const filteredFunds = INVESTMENT_FUNDS.filter((fund) => {
+    const matchesRisk = fundFilter === "All" || fund.risk === fundFilter;
+    const matchesVehicle = fundVehicleFilter === "All funds" || fund.vehicle === fundVehicleFilter;
+    const matchesHouse = fundHouseFilter === "All fund houses" || fund.house === fundHouseFilter;
+    const query = fundSearch.trim().toLowerCase();
+    return matchesRisk && matchesVehicle && matchesHouse && (!query || `${fund.name} ${fund.type} ${fund.house}`.toLowerCase().includes(query));
+  });
+  const fundMonthlyRate = fundSipRate / 100 / 12;
+  const fundSipMonths = fundSipYears * 12;
+  const fundProjectedValue = fundMonthlyRate > 0
+    ? investmentAmount * ((Math.pow(1 + fundMonthlyRate, fundSipMonths) - 1) / fundMonthlyRate) * (1 + fundMonthlyRate)
+    : investmentAmount * fundSipMonths;
+  const fundInvestedValue = investmentAmount * fundSipMonths;
+  const recommendationPool = comparedFunds.length > 0 ? comparedFunds : [selectedFund];
+  const recommendedFund = [...recommendationPool].sort((first, second) => {
+    const score = (fund) => Number.parseFloat(fund.return5y) * 2 - Number.parseFloat(fund.expense) * 3 - Number.parseFloat(fund.maxDrawdown.replace("-", ""));
+    return score(second) - score(first);
+  })[0];
+  const recommendationReasons = [
+    `${recommendedFund.return5y} 5Y annualised return in this comparison`,
+    `${recommendedFund.expense} expense ratio`,
+    `${recommendedFund.maxDrawdown} illustrative maximum drawdown`,
+    `${recommendedFund.risk} risk profile matches a long-term growth shortlist`,
+  ];
+
+  function toggleCompare(fundId) {
+    setCompareFundIds((current) => {
+      const next = current.includes(fundId)
+        ? current.filter((id) => id !== fundId)
+        : current.length < 3 ? [...current, fundId] : current;
+      if (!current.includes(fundId) && current.length < 3) {
+        window.setTimeout(() => document.getElementById("fund-comparison")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 0);
+      }
+      return next;
+    });
+  }
 
   async function loadGuides() {
     setLoading(true);
@@ -66,10 +183,46 @@ export default function Directory({ user }) {
     }
   }
 
+  async function loadMarketData() {
+    setMarketLoading(true);
+    setMarketError("");
+    try {
+      let data;
+      if (import.meta.env.DEV) {
+        const results = await Promise.all(MARKET_SYMBOLS.map(async ({ symbol, name, kind }) => {
+          const response = await fetch(`/market-feed/${encodeURIComponent(symbol)}?range=5d&interval=1d`);
+          if (!response.ok) throw new Error(`Market data request failed for ${symbol}`);
+          const result = (await response.json()).chart?.result?.[0];
+          const meta = result?.meta;
+          const price = typeof (meta?.regularMarketPrice ?? meta?.previousClose) === "number" ? (meta.regularMarketPrice ?? meta.previousClose) : null;
+          const previousClose = typeof (meta?.chartPreviousClose ?? meta?.previousClose) === "number" ? (meta.chartPreviousClose ?? meta.previousClose) : null;
+          const change = price !== null && previousClose !== null ? price - previousClose : null;
+          return { symbol, name, kind, price, change, changePercent: change !== null && previousClose ? (change / previousClose) * 100 : null, currency: meta?.currency || "INR" };
+        }));
+        data = { updatedAt: new Date().toISOString(), source: "Yahoo Finance public chart feed", quotes: results };
+      } else {
+        ({ data } = await api.get("/market/snapshot"));
+      }
+      setMarketData(data);
+    } catch (err) {
+      setMarketError(err.response?.data?.error || "Live market data is temporarily unavailable.");
+    } finally {
+      setMarketLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadGuides();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vertical, maxPrice]);
+
+  useEffect(() => {
+    if (!investmentOpen) return undefined;
+    loadMarketData();
+    const refreshTimer = window.setInterval(loadMarketData, 60 * 60 * 1000);
+    return () => window.clearInterval(refreshTimer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [investmentOpen]);
 
   const visibleGuides = guides.filter((guide) => {
     const query = search.trim().toLowerCase();
@@ -201,7 +354,7 @@ export default function Directory({ user }) {
               className={`focus-item ${selectedFocus === area.id ? "selected" : ""}`}
               href={user ? "#focus-detail" : "/login"}
               key={area.label}
-              onClick={() => { setSelectedFocus(area.id); setFocusAnswer(Object.keys(area.options)[0]); setVertical(area.vertical); setSelectedPath(area.vertical); }}
+              onClick={() => { setSelectedFocus(area.id); setFocusAnswer(Object.keys(area.options)[0]); setVertical(area.vertical); setSelectedPath(area.vertical); setInvestmentOpen(area.id === "sip"); if (area.id === "sip") setTimeout(() => document.getElementById("investment-lab")?.scrollIntoView({ behavior: "smooth" }), 0); }}
             >
               <span className="focus-item-arrow" aria-hidden="true">↗</span>
               <strong>{area.label}</strong>
@@ -256,6 +409,69 @@ export default function Directory({ user }) {
           <p className="calculator-disclaimer">Illustrative estimate only. Returns, rates, taxes, and eligibility vary. Speak with a qualified professional before acting.</p>
         </div>
       </section>
+
+      {investmentOpen && <section className="investment-lab" id="investment-lab" aria-labelledby="investment-title">
+        <div className="investment-lab-heading">
+          <div>
+            <p className="eyebrow">SIP and investing, made legible</p>
+            <h2 id="investment-title">Choose a fund with the full picture in view.</h2>
+            <p>Compare category, risk, costs, and long-term history before you set a contribution. Past performance is context, not a promise.</p>
+          </div>
+          <div className="investment-signal"><span className="signal-dot" />Research mode <span>·</span> No execution</div>
+        </div>
+
+        <div className="market-research">
+          <div className="market-research-heading"><div><span className="detail-label">Live market pulse</span><h3>Know the backdrop before choosing a SIP.</h3></div><span className="market-updated">{marketLoading ? "Updating…" : marketData ? `Updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(marketData.updatedAt))}` : "Waiting for data"}</span></div>
+          {marketError ? <div className="market-message error">{marketError} <button type="button" onClick={loadMarketData}>Retry</button></div> : marketLoading && !marketData ? <div className="market-message">Fetching current index and ETF quotes…</div> : <>
+            <div className="market-quote-grid">{(marketData?.quotes || []).map((quote) => <div className="market-quote" key={quote.symbol}><span>{quote.name}</span><strong>{quote.kind === "index" ? "₹" : "₹"}{formatMarketValue(quote)}</strong><small className={quote.changePercent >= 0 ? "positive" : "negative"}>{formatMarketChange(quote)}</small></div>)}</div>
+            <div className="market-research-note"><strong>{marketData?.partial ? "Some quotes are delayed or unavailable." : marketData?.stale ? "Showing the last successful snapshot." : "What this means"}</strong><span>Use one day of movement as context, not a reason to start or stop a long-term SIP. Compare goals, time horizon, diversification, costs, and downside tolerance first.</span><span className="market-source">Source: {marketData?.source || "public market feed"}</span></div>
+          </>}
+        </div>
+
+        <div className="investment-layout">
+          <div className="fund-explorer">
+            <div className="fund-toolbar">
+              <span className="detail-label">Explore {filteredFunds.length} of {INVESTMENT_FUNDS.length} research funds</span>
+              <div className="fund-filters" role="group" aria-label="Filter funds by risk">
+                {["All funds", "Mutual Fund", "ETF"].map((vehicle) => <button type="button" className={fundVehicleFilter === vehicle ? "active" : ""} key={vehicle} onClick={() => setFundVehicleFilter(vehicle)}>{vehicle === "All funds" ? "All" : vehicle === "Mutual Fund" ? "Mutual funds" : "ETFs"}</button>)}
+                {["All", "Low", "Moderate", "High"].map((risk) => <button type="button" className={fundFilter === risk ? "active" : ""} key={risk} onClick={() => setFundFilter(risk)}>{risk}</button>)}
+              </div>
+            </div>
+            <div className="fund-search-controls">
+              <input type="search" aria-label="Search funds" placeholder="Search fund or category" value={fundSearch} onChange={(e) => setFundSearch(e.target.value)} />
+              <select aria-label="Filter by fund house" value={fundHouseFilter} onChange={(e) => setFundHouseFilter(e.target.value)}><option>All fund houses</option>{FUND_HOUSES.map((house) => <option key={house}>{house}</option>)}</select>
+            </div>
+            <div className="fund-list">
+              {filteredFunds.length === 0 ? <div className="fund-empty">No funds match these filters. Try another house, category, or risk level.</div> : filteredFunds.map((fund) => <div className={`fund-row ${selectedFund.id === fund.id ? "selected" : ""}`} key={fund.id}>
+                <span className="fund-icon">↗</span>
+                <span className="fund-name"><strong>{fund.name}</strong><small>{fund.vehicle} · {fund.house} · {fund.type}</small></span>
+                <span className="fund-risk">{fund.risk}<small>risk</small></span>
+                <span className="fund-return">{fund.return5y}<small>5Y annualised</small></span>
+                <button type="button" className="fund-select-button" onClick={() => setSelectedFundId(fund.id)}>View</button>
+                <button type="button" className={`compare-button ${compareFundIds.includes(fund.id) ? "active" : ""}`} aria-pressed={compareFundIds.includes(fund.id)} onClick={(event) => { event.stopPropagation(); toggleCompare(fund.id); }}>{compareFundIds.includes(fund.id) ? "Compared" : "Compare"}</button>
+              </div>)}
+            </div>
+          </div>
+
+          <div className="fund-detail">
+            <div className="fund-detail-top"><div><span className="detail-label">Selected {selectedFund.vehicle.toLowerCase()} · {selectedFund.house}</span><h3>{selectedFund.name}</h3><p>{selectedFund.type} · NAV {selectedFund.nav} · Launched {selectedFund.inception}</p></div><span className={`risk-pill ${selectedFund.risk.toLowerCase()}`}>{selectedFund.risk} risk</span></div>
+            <div className="history-chart" aria-label="Illustrative five year performance history">
+              {selectedFund.history.map((height, index) => <span key={`${selectedFund.id}-${index}`} style={{ height: `${height}%` }} />)}
+              <div className="chart-labels"><span>5Y ago</span><span>Today</span></div>
+            </div>
+            <div className="fund-calculator"><div className="fund-calculator-result"><span className="detail-label">SIP projection</span><strong>{formatINR(fundProjectedValue)}</strong><small>Estimated value after {fundSipYears} years · Gain {formatINR(Math.max(0, fundProjectedValue - fundInvestedValue))}</small></div><div className="fund-calculator-controls"><label>Monthly SIP <output>{formatINR(investmentAmount)}</output><input type="range" min="500" max="100000" step="500" value={investmentAmount} onChange={(e) => setInvestmentAmount(Number(e.target.value))} /></label><label>Expected annual return <output>{fundSipRate}%</output><input type="range" min="1" max="25" step="0.5" value={fundSipRate} onChange={(e) => setFundSipRate(Number(e.target.value))} /></label><label>Time horizon <output>{fundSipYears} years</output><input type="range" min="1" max="40" step="1" value={fundSipYears} onChange={(e) => setFundSipYears(Number(e.target.value))} /></label></div></div>
+            <div className="fund-detail-section"><span className="detail-label">Past performance</span><div className="performance-table"><div><span>1Y</span><strong>{selectedFund.return1y}</strong></div><div><span>3Y CAGR</span><strong>{selectedFund.return3y}</strong></div><div><span>5Y CAGR</span><strong>{selectedFund.return5y}</strong></div><div><span>Since inception</span><strong>{selectedFund.sinceInception}</strong></div></div></div>
+            <div className="fund-metrics"><div><span>Expense ratio</span><strong>{selectedFund.expense}</strong></div><div><span>Volatility</span><strong>{selectedFund.volatility}</strong></div><div><span>Max drawdown</span><strong>{selectedFund.maxDrawdown}</strong></div><div><span>AUM</span><strong>{selectedFund.aum}</strong></div><div><span>Benchmark</span><strong>{selectedFund.benchmark}</strong></div><div><span>Min SIP</span><strong>₹500</strong></div></div>
+            <div className="fund-detail-section holdings-section"><div className="holdings-heading"><span className="detail-label">Top holdings</span><small>Portfolio snapshot</small></div>{selectedFund.holdings.map((holding) => <div className="holding-row" key={holding.name}><span>{holding.name}</span><strong>{holding.weight}</strong><i><b style={{ width: holding.weight }} /></i></div>)}</div>
+            <div className="fund-research-grid"><div className="fund-detail-section manager-section"><span className="detail-label">Fund manager and background</span><h4>{selectedFund.manager.name}</h4><p><strong>Experience:</strong> {selectedFund.manager.experience}</p><p><strong>Background:</strong> {selectedFund.manager.background}</p><small>Source status: {selectedFund.manager.source}</small></div><div className="fund-detail-section manager-section"><div className="holdings-heading"><span className="detail-label">Fund flows</span><small>Quarterly snapshot</small></div><div className="flow-list">{selectedFund.flows.map((flow) => <div key={flow.period}><span>{flow.period}</span><strong>{flow.value}</strong><i><b style={{ width: `${Math.min(100, parseInt(flow.value.replace(/\D/g, ""), 10) * 2)}%` }} /></i></div>)}</div></div></div>
+            <div className="compliance-panel"><span className="detail-label">Regulatory and reputation checks</span><strong>Verified allegations data not connected</strong><p>No fraud, misconduct, or legal-history conclusion is made here. Check SEBI orders, exchange notices, scheme disclosures, court records, and the fund house’s official filings before relying on a manager or fund profile.</p><small>Evidence status: pending verified source integration</small><div className="research-links"><a href="https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListingAll=yes" target="_blank" rel="noreferrer">SEBI orders and enforcement ↗</a><a href="https://portal.amfiindia.com/spages/NAVAll.txt" target="_blank" rel="noreferrer">AMFI NAV file ↗</a><a href="https://www.nseindia.com/market-data/exchange-traded-funds-etf" target="_blank" rel="noreferrer">NSE ETF market data ↗</a></div></div>
+            <div className="sip-setup"><div><span className="detail-label">Set your contribution</span><label htmlFor="investment-amount">Monthly amount <output>{formatINR(investmentAmount)}</output></label><input id="investment-amount" type="range" min="500" max="100000" step="500" value={investmentAmount} onChange={(e) => setInvestmentAmount(Number(e.target.value))} /></div><label htmlFor="investment-frequency">Frequency<select id="investment-frequency" value={investmentFrequency} onChange={(e) => setInvestmentFrequency(e.target.value)}><option>Monthly</option><option>Quarterly</option></select></label></div>
+            <div className="investment-review"><span><strong>{formatINR(investmentAmount)}</strong> / {investmentFrequency.toLowerCase()} SIP</span><button type="button" onClick={() => setInvestmentOpen(false)}>Save this shortlist <span aria-hidden="true">↗</span></button></div>
+          </div>
+        </div>
+        <div className="comparison-panel" id="fund-comparison"><div className="comparison-heading"><div><span className="detail-label">Compare and select</span><h3>Make the shortlist earn its place.</h3></div><span>{comparedFunds.length}/3 selected</span></div>{comparedFunds.length === 0 ? <p>Select up to three funds from the catalogue to compare them. The recommendation will explain its choice using the visible metrics.</p> : <><div className="comparison-table"><div className="comparison-table-head"><span>Fund</span><span>5Y CAGR</span><span>Cost</span><span>Risk</span><span>Drawdown</span></div>{comparedFunds.map((fund) => <div className={`comparison-table-row ${recommendedFund.id === fund.id ? "recommended" : ""}`} key={fund.id}><strong>{fund.name}</strong><span>{fund.return5y}</span><span>{fund.expense}</span><span>{fund.risk}</span><span>{fund.maxDrawdown}</span></div>)}</div><div className="recommendation-box"><span className="detail-label">Recommendation for this shortlist</span><h4>{recommendedFund.name}</h4><p>This is the strongest fit among the selected funds based on the current comparison, not a guaranteed winner.</p><ul>{recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul><small>Verify official factsheets, current NAV, portfolio, taxation, and suitability before investing.</small></div></>}</div>
+        <p className="investment-disclaimer">Catalogue includes {INVESTMENT_FUNDS.length} research entries across {FUND_HOUSES.length} fund houses. Performance figures shown here are illustrative research estimates until a licensed NAV and factsheet provider is connected. Always verify the latest scheme document, benchmark, tracking difference, exit load, taxation, and suitability before investing.</p>
+      </section>}
 
       {false && <section className="planner-section" aria-labelledby="planner-title">
         <div className="planner-heading">
